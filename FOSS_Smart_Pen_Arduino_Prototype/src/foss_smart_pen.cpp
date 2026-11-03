@@ -72,13 +72,18 @@
   Serial monitor / PC: 500000 baud
 */
 
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
 
+
+
+
 // ============================================================================
 // 1. USER CONFIGURATION
 // ============================================================================
+
 
 // ---- 1.1 Serial link --------------------------------------------------------
 // A drawing line is 22-35 bytes. 500 lines/s = 11-17.5 kB/s; 115200 baud only carries 11.5 kB/s, so it is marginal at best
@@ -86,10 +91,12 @@
 // If your PC sees garbage, try 250000 (still enough) and keep OUTPUT_RATE_HZ
 const uint32_t SERIAL_BAUD = 500000UL;
 
+
 // ---- 1.2 Pins ---------------------------------------------------------------
 const uint8_t  PIN_CAL_BUTTON      = 2;            // to GND, INPUT_PULLUP
 const uint8_t  PIN_STATUS_LED      = LED_BUILTIN;  // D13
 const uint16_t BUTTON_DEBOUNCE_MS  = 30;
+
 
 // ---- 1.3 Timing -------------------------------------------------------------
 const uint16_t OUTPUT_RATE_HZ        = 500;
@@ -97,6 +104,7 @@ const uint32_t SAMPLE_PERIOD_US      = 1000000UL / OUTPUT_RATE_HZ;
 const uint8_t  I2C_FAIL_LIMIT        = 10;    // consecutive failed reads before "I2C_LOST"
 const uint16_t IMU_RETRY_INTERVAL_MS = 500;   // reconnect attempts while the IMU is missing
 const uint16_t DIAG_INTERVAL_MS      = 100;   // one status/raw/quaternion line per interval
+
 
 // ---- 1.4 MPU-6050 settings ---------------------------------------------------
 // Range codes are the 2-bit values written to FS_SEL / AFS_SEL.
@@ -108,6 +116,7 @@ const uint8_t GYRO_RANGE_250DPS  = 0;  // 131.0 LSB/(deg/s)
 const uint8_t GYRO_RANGE_500DPS  = 1;  //  65.5
 const uint8_t GYRO_RANGE_1000DPS = 2;  //  32.8
 const uint8_t GYRO_RANGE_2000DPS = 3;  //  16.4
+
 
 struct MpuConfig {
   uint8_t  i2cAddress;         // 0x68 (AD0 = GND) or 0x69 (AD0 = VCC)
@@ -124,6 +133,7 @@ struct MpuConfig {
   uint8_t  accelHighPass;      // ACCEL_CONFIG.ACCEL_HPF 0..7. MUST stay 0: the high-pass removes gravity.
 };
 
+
 MpuConfig mpuConfig = {
   0x68,                 // i2cAddress
   400000UL,             // i2cClockHz
@@ -135,11 +145,11 @@ MpuConfig mpuConfig = {
   0                     // accelHighPass
 };
 
+
 // Set true to switch off the Arduino's internal 20-50k pull-ups on SDA/SCL after
 // Wire.begin(). This keeps the bus at the GY-521's 3.3 V level, but ONLY do it if your
 // GY-521 has its own pull-ups (most do, typically 4.7k). Default false = standard Wire.
 const bool DISABLE_I2C_INTERNAL_PULLUPS = false;
-
 
 
 // ---- 1.5 Orientation filter ---------------------------------------------------
@@ -206,7 +216,6 @@ const float RAD2DEG_F = 57.29578f;
 
 
 
-
 // ============================================================================
 // 2. TYPES AND GLOBAL STATE
 // ============================================================================
@@ -217,36 +226,39 @@ const uint8_t STATE_CAL_SETTLE   = 2;
 const uint8_t STATE_CAL_SAMPLING = 3;
 const uint8_t STATE_TRACKING     = 4;
 
+
 struct ImuSample {
   float    accelG[3];     // g, sensor frame (specific force)
   float    gyroDps[3];    // deg/s, sensor frame (bias NOT removed)
   uint32_t timestampUs;   // micros() just before the I2C read
 };
 
+
 struct Plane {
   float point[3];         // a point on the plane (world frame, metres)
   float normal[3];        // unit normal (world frame)
 };
 
+
 // Small fixed buffer for building one protocol line without String/malloc.
 const uint32_t POW10_TABLE[10] = {
-  1000000000UL, 100000000UL, 10000000UL, 1000000UL, 100000UL, 
-  10000UL, 1000UL, 100UL, 10UL, 1UL
+  1000000000UL, 100000000UL, 10000000UL, 
+  1000000UL, 100000UL, 10000UL, 
+  1000UL, 100UL, 10UL, 
+  1UL
 };
 
 struct LineBuf {
   char    data[64];       // 64 = Nano TX buffer size; longer lines could block
   uint8_t len;
 
-  void reset() { len = 0; }
-  
-  void putChar(char c) { 
-    if (len < sizeof(data)) { 
-      data[len++] = c;
-    }
-  }
-  void comma()   { putChar(','); }
-  void endLine() { putChar('\n'); }
+  void reset() {  len = 0;  }
+
+  void putChar(char c) {  if (len < sizeof(data))  data[len++] = c;  }
+
+  void comma() {  putChar(',');  }
+
+  void endLine() {  putChar('\n');  }
 
   // Text stored in flash, e.g. lb.putText(F("D,"))
   void putText(const __FlashStringHelper* text) {
@@ -282,15 +294,17 @@ struct LineBuf {
       putChar('-'); 
       putUnsigned((uint32_t)(-(v + 1)) + 1UL); 
     }
-    else       { 
+    else { 
       putUnsigned((uint32_t)v); 
     }
   }
 };
 
+
 // --- MPU ---
 float accelPerLsb = 1.0f / 16384.0f;   // g per LSB      (set in mpuBegin)
 float gyroPerLsb  = 1.0f / 65.5f;      // deg/s per LSB  (set in mpuBegin)
+
 
 // --- system ---
 uint8_t   systemState = STATE_NO_IMU;
@@ -300,10 +314,12 @@ uint8_t   i2cFailStreak = 0;
 uint16_t  i2cFailTotal  = 0;
 uint32_t  lastRetryMs   = 0;
 
+
 // --- calibration accumulators ---
 uint32_t calStateStartMs = 0;
 uint16_t calSamplesTaken = 0;
 float    calSumAccel[3], calSumGyro[3], calSumGyroSq;
+
 
 // --- calibration results ---
 float gyroBiasDps[3]     = { 0, 0, 0 };
@@ -312,6 +328,7 @@ float calibrationQuat[4] = { 1, 0, 0, 0 };                // sensor 3D angle at 
 float rayAxisUnit[3]     = { 0, 0, -1 };
 Plane writingPlane       = { { 0, 0, 0 }, { 0, 0, 1 } };
 float originX_m          = 0, originY_m = 0;              // intersection point at calibration -> page (0,0)
+
 
 // --- tracking state ---
 float   quat[4]         = { 1, 0, 0, 0 };  // w,x,y,z  body -> world
@@ -323,6 +340,7 @@ float   prevLinAccel[3] = { 0, 0, 0 };     // previous tick (trapezoid rule)
 float   prevGyroRad[3]  = { 0, 0, 0 };     // previous tick (trapezoid rule)
 bool    penDown = false;
 uint16_t strokeId = 0;
+
 
 // --- diagnostics ---
 uint16_t overrunCount = 0;
@@ -339,17 +357,22 @@ float    lastHeightM  = 0;
 // 3. SERIAL OUTPUT
 // ============================================================================
 
+
 // Never block the real-time loop for drawing/diagnostic lines: 
 // - if the Nano's 64-byte TX buffer cannot take the whole line, drop it and count it
 // - Events (mustSend) may block for a moment, they are rare
 bool sendLine(const LineBuf& lb, bool mustSend) {
+
   if (!mustSend && (uint8_t)Serial.availableForWrite() < lb.len) {
     txDropCount++;
     return false;
   }
+
   Serial.write((const uint8_t*)lb.data, lb.len);
+
   return true;
 }
+
 
 void sendError(const __FlashStringHelper* code) {
   LineBuf lb;
@@ -361,6 +384,7 @@ void sendError(const __FlashStringHelper* code) {
   sendLine(lb, true);
 }
 
+
 void sendInfo(const __FlashStringHelper* text) {
   LineBuf lb; 
   
@@ -370,6 +394,7 @@ void sendInfo(const __FlashStringHelper* text) {
 
   sendLine(lb, true);
 }
+
 
 int32_t toOutputUnits(float metres) {
   float v = metres * OUTPUT_UNITS_PER_M;
@@ -389,6 +414,7 @@ int32_t toOutputUnits(float metres) {
 // 4. MPU-6050 DRIVER (register map: InvenSense MPU-6000/MPU-6050 register map)
 // ============================================================================
 
+
 const uint8_t MPU_REG_SMPLRT_DIV    = 0x19,
               MPU_REG_CONFIG        = 0x1A,
               MPU_REG_GYRO_CONFIG   = 0x1B,
@@ -398,9 +424,11 @@ const uint8_t MPU_REG_SMPLRT_DIV    = 0x19,
               MPU_REG_WHO_AM_I      = 0x75,
               MPU_WHO_AM_I_VALUE    = 0x68;
 
+
 const uint8_t MPU_OK         = 0, 
               MPU_NOT_FOUND  = 1, 
               MPU_BAD_CONFIG = 2;
+
 
 const float ACCEL_LSB_PER_G[4]  = { 
   16384.0f, 
@@ -408,6 +436,7 @@ const float ACCEL_LSB_PER_G[4]  = {
   4096.0f, 
   2048.0f 
 };
+
 const float GYRO_LSB_PER_DPS[4] = { 
   131.0f, 
   65.5f, 
@@ -415,12 +444,14 @@ const float GYRO_LSB_PER_DPS[4] = {
   16.4f 
 };
 
+
 bool mpuWriteReg(uint8_t reg, uint8_t value) {
   Wire.beginTransmission(mpuConfig.i2cAddress);
   Wire.write(reg);
   Wire.write(value);
   return Wire.endTransmission() == 0;
 }
+
 
 bool mpuReadRegs(uint8_t firstReg, uint8_t* out, uint8_t count) {
   Wire.beginTransmission(mpuConfig.i2cAddress);
@@ -451,37 +482,34 @@ bool mpuReadRegs(uint8_t firstReg, uint8_t* out, uint8_t count) {
   return true;
 }
 
+
 // Full (re)initialisation from mpuConfig. Uses delay(): only called at start-up / reconnect.
 uint8_t mpuBegin() {
   Wire.setClock(mpuConfig.i2cClockHz);
 
   uint8_t who = 0;
 
-  if (!mpuReadRegs(MPU_REG_WHO_AM_I, &who, 1)) {
-    return MPU_NOT_FOUND; 
-  }
-  if (who != MPU_WHO_AM_I_VALUE) {                  // clones may report another ID; warn, keep going
+  if (!mpuReadRegs(MPU_REG_WHO_AM_I, &who, 1))    return MPU_NOT_FOUND; 
+
+  if (who != MPU_WHO_AM_I_VALUE) { // clones may report another ID; warn, keep going
     LineBuf lb; 
     
     lb.reset();
-    lb.putText(F("W,WHO_AM_I,")); 
-    lb.putUnsigned(who); 
+    lb.putText(F("W,WHO_AM_I,")); lb.putUnsigned(who); 
     lb.endLine();
 
     sendLine(lb, true);
   }
 
-  if (!mpuWriteReg(MPU_REG_PWR_MGMT_1, 0x80)) { // DEVICE_RESET
-    return MPU_NOT_FOUND;
-  }
+
+  if (!mpuWriteReg(MPU_REG_PWR_MGMT_1, 0x80))    return MPU_NOT_FOUND;  // DEVICE_RESET
 
   delay(100);
 
-  if (!mpuWriteReg(MPU_REG_PWR_MGMT_1, mpuConfig.clockSource & 0x07)) { // wake + clock
-    return MPU_NOT_FOUND;
-  }
+  if (!mpuWriteReg(MPU_REG_PWR_MGMT_1, mpuConfig.clockSource & 0x07))    return MPU_NOT_FOUND;  // wake + clock
 
   delay(10);
+
 
   uint8_t gyroCfg  = (uint8_t)((mpuConfig.gyroRange   & 0x03) << 3);
   uint8_t accelCfg = (uint8_t)(((mpuConfig.accelRange & 0x03) << 3)   |   (mpuConfig.accelHighPass & 0x07));
@@ -492,46 +520,63 @@ uint8_t mpuBegin() {
          && mpuWriteReg( MPU_REG_ACCEL_CONFIG, accelCfg                    )
   ;
   
-  if (!ok) {
-    return MPU_NOT_FOUND;
-  }
+  if (!ok)    return MPU_NOT_FOUND;
+
 
   // Read back so a silent write failure cannot go unnoticed.
   uint8_t rbGyro = 0xFF, rbAccel = 0xFF;
-  if (!mpuReadRegs(MPU_REG_GYRO_CONFIG, &rbGyro, 1)) {
-    return MPU_NOT_FOUND;
-  }
-  if (!mpuReadRegs(MPU_REG_ACCEL_CONFIG, &rbAccel, 1)) return MPU_NOT_FOUND;
-  if ((rbGyro & 0x18) != gyroCfg || (rbAccel & 0x1F) != accelCfg) return MPU_BAD_CONFIG;
 
-  accelPerLsb = 1.0f / ACCEL_LSB_PER_G[mpuConfig.accelRange & 0x03];
-  gyroPerLsb  = 1.0f / GYRO_LSB_PER_DPS[mpuConfig.gyroRange & 0x03];
-  delay(50);                                         // let the gyro settle after wake-up
+  if (!mpuReadRegs(MPU_REG_GYRO_CONFIG, &rbGyro, 1))       return MPU_NOT_FOUND;
+  if (!mpuReadRegs(MPU_REG_ACCEL_CONFIG, &rbAccel, 1))     return MPU_NOT_FOUND;
+
+  if ((rbGyro & 0x18) != gyroCfg || (rbAccel & 0x1F) != accelCfg)     return MPU_BAD_CONFIG;
+
+  accelPerLsb = 1.0f  /  ACCEL_LSB_PER_G  [mpuConfig.accelRange & 0x03];
+  gyroPerLsb  = 1.0f  /  GYRO_LSB_PER_DPS [mpuConfig.gyroRange  & 0x03];
+
+  delay(50);  // let the gyro settle after wake-up
+                                         
   return MPU_OK;
 }
 
+
 // One burst read of accel + gyro. Returns false on any I2C problem (never returns stale data).
 bool mpuReadSample(ImuSample& s) {
+
   uint8_t raw[14];
+
   s.timestampUs = micros();
-  if (!mpuReadRegs(MPU_REG_ACCEL_XOUT_H, raw, 14)) return false;
+
+  if (!mpuReadRegs(MPU_REG_ACCEL_XOUT_H, raw, 14)) {
+    return false;
+  }
+
   int16_t ax = (int16_t)(((uint16_t)raw[0]  << 8) | raw[1]);
   int16_t ay = (int16_t)(((uint16_t)raw[2]  << 8) | raw[3]);
   int16_t az = (int16_t)(((uint16_t)raw[4]  << 8) | raw[5]);
+
   // raw[6], raw[7] = temperature (unused)
+
   int16_t gx = (int16_t)(((uint16_t)raw[8]  << 8) | raw[9]);
   int16_t gy = (int16_t)(((uint16_t)raw[10] << 8) | raw[11]);
   int16_t gz = (int16_t)(((uint16_t)raw[12] << 8) | raw[13]);
-  s.accelG[0] = ax * accelPerLsb;  s.accelG[1] = ay * accelPerLsb;  s.accelG[2] = az * accelPerLsb;
-  s.gyroDps[0] = gx * gyroPerLsb;  s.gyroDps[1] = gy * gyroPerLsb;  s.gyroDps[2] = gz * gyroPerLsb;
+
+  s.accelG[0]  = ax * accelPerLsb;  s.accelG[1]  = ay * accelPerLsb;  s.accelG[2]  = az * accelPerLsb;
+  s.gyroDps[0] = gx * gyroPerLsb;   s.gyroDps[1] = gy * gyroPerLsb;   s.gyroDps[2] = gz * gyroPerLsb;
   return true;
 }
+
+
+
 
 // ============================================================================
 // 5. ORIENTATION (quaternion, complementary filter)
 // ============================================================================
 
-float dot3(const float a[3], const float b[3]) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+float dot3(const float a[3], const float b[3]) { 
+  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
 
 // Rotation matrix (row-major) of body->world for the current quaternion.
 // Equals Rz(yaw)*Ry(pitch)*Rx(roll).
@@ -542,6 +587,7 @@ void quaternionToMatrix(float R[9]) {
   R[6] = 2.0f*(x*z - w*y);         R[7] = 2.0f*(y*z + w*x);        R[8] = 1.0f - 2.0f*(x*x + y*y);
 }
 
+
 // Quaternion for yaw = 0 and the given roll/pitch (radians): q = qy(pitch) * qx(roll).
 void quaternionFromRollPitch(float roll, float pitch, float q[4]) {
   float cr = cosf(0.5f * roll),  sr = sinf(0.5f * roll);
@@ -549,7 +595,8 @@ void quaternionFromRollPitch(float roll, float pitch, float q[4]) {
   q[0] = cr * cp;  q[1] = sr * cp;  q[2] = cr * sp;  q[3] = -sr * sp;
 }
 
-// One filter step.
+
+// One filter step
 //   gyroRad : bias-corrected angular rate, rad/s, sensor frame
 //   accelG  : accelerometer, g
 // Complementary filter idea (same as  angle = a*(angle + gyro*dt) + (1-a)*acc_angle):
@@ -559,24 +606,36 @@ void quaternionFromRollPitch(float roll, float pitch, float q[4]) {
 // sin(angle between them), so for small errors it is the angle itself.
 // Predicted "up" in the sensor frame is the third ROW of R.
 // Gravity only fixes roll and pitch; yaw (rotation about vertical) is never corrected.
+
 void updateOrientation(const float accelG[3], const float gyroRad[3], float dt) {
+
   // Rotation angle vector (rad) over this step. Trapezoid rule: average the previous and the
   // current rate. Using only the current rate lags by half a sample, which showed up as ~0.06 deg
   // of tilt error (= fake acceleration) in simulation during a 55 deg/s rotation.
   float step[3] = { 0.5f * (gyroRad[0] + prevGyroRad[0]) * dt,
                     0.5f * (gyroRad[1] + prevGyroRad[1]) * dt,
                     0.5f * (gyroRad[2] + prevGyroRad[2]) * dt };
-  prevGyroRad[0] = gyroRad[0]; prevGyroRad[1] = gyroRad[1]; prevGyroRad[2] = gyroRad[2];
+
+
+  prevGyroRad[0] = gyroRad[0]; 
+  prevGyroRad[1] = gyroRad[1]; 
+  prevGyroRad[2] = gyroRad[2];
+
 
   // Accelerometer tilt correction. Skipped entirely (no sqrt, no division) when the gain is zero,
   // i.e. while moving with FILTER_ALPHA_MOVING = 1.0 - this saves a lot of time on an 8-bit AVR.
   float alpha = (stationaryCount >= ZUPT_MIN_SAMPLES) ? FILTER_ALPHA : FILTER_ALPHA_MOVING;
   float k = 1.0f - alpha;
+
+
   if (k > 0.0f) {
     // Trust the accelerometer only if |a| is within the band around measured gravity
-    // (compared as squares to avoid a sqrt).
+    // Compared as squares to avoid calculating sqrt
     float n2a = dot3(accelG, accelG);
-    float lo = gravityRefG - ACCEL_TRUST_BAND_G, hi = gravityRefG + ACCEL_TRUST_BAND_G;
+    float lo = gravityRefG - ACCEL_TRUST_BAND_G, 
+          hi = gravityRefG + ACCEL_TRUST_BAND_G;
+
+
     if (n2a > lo * lo && n2a < hi * hi) {
       float inv = 1.0f / sqrtf(n2a);
       float ax = accelG[0] * inv, ay = accelG[1] * inv, az = accelG[2] * inv;
@@ -584,11 +643,13 @@ void updateOrientation(const float accelG[3], const float gyroRad[3], float dt) 
       float vx = 2.0f * (x*z - w*y);               // predicted up, sensor frame
       float vy = 2.0f * (y*z + w*x);
       float vz = 1.0f - 2.0f * (x*x + y*y);
+
       step[0] += k * (ay*vz - az*vy);
       step[1] += k * (az*vx - ax*vz);
       step[2] += k * (ax*vy - ay*vx);
     }
   }
+
 
   // q <- q + 0.5 * q (x) (0, step)   (first-order integration, fine for a 2 ms step)
   float hx = 0.5f * step[0], hy = 0.5f * step[1], hz = 0.5f * step[2];
@@ -598,24 +659,32 @@ void updateOrientation(const float accelG[3], const float gyroRad[3], float dt) 
   float ny = y + (w*hy + z*hx - x*hz);
   float nz = z + (w*hz + x*hy - y*hx);
 
+
   // Renormalise with one Newton step for 1/sqrt(n2): valid because n2 is within ~1e-3 of 1.
   float n2 = nw*nw + nx*nx + ny*ny + nz*nz;
   float s = 1.5f - 0.5f * n2;
   quat[0] = nw * s;  quat[1] = nx * s;  quat[2] = ny * s;  quat[3] = nz * s;
 }
 
+
+
+
 // ============================================================================
 // 6. POSITION (double integration + zero-velocity update)  -- EXPERIMENTAL
 // ============================================================================
 
+
 void resetMotionState() {
+
   for (uint8_t i = 0; i < 3; i++) { 
     posM[i] = 0; velMps[i] = 0; 
     prevLinAccel[i] = 0; 
     prevGyroRad[i] = 0; 
   }
+
   stationaryCount = 0;
 }
+
 
 // Gravity-removed acceleration in the world frame + "is the pen still?" detector.
 // Runs every tick (also when INTEGRATE_POSITION is false) because the orientation filter uses it.
@@ -629,18 +698,15 @@ void updateStillness(const float R[9], const float accelG[3], const float gyroRa
 
   float wMax = ZUPT_MAX_GYRO_DPS * DEG2RAD_F;
   float aMax = ZUPT_MAX_LINEAR_ACCEL_G * G_MPS2;
-  float w2   = dot3(gyroRad, gyroRad);
+  float w2   = dot3(gyroRad,  gyroRad );
   float lin2 = dot3(linAccel, linAccel);
+
 
   bool still = (w2 < wMax * wMax) && (lin2 < aMax * aMax);
 
   if (still) { 
-    if (stationaryCount < 255) {
-      stationaryCount++; 
-    } 
-    else { 
-      stationaryCount = 0; 
-    }
+    if (stationaryCount < 255)  stationaryCount++;
+    else                        stationaryCount = 0;
   }
 }
 
@@ -680,10 +746,13 @@ void updatePosition(float dt) {
 // plane (dir . normal < -MIN_RAY_DOWNWARD), so near-parallel rays never produce huge jumps.
 // t may be slightly negative if drift put the sensor below the plane; the line is still used.
 bool intersectRayWithPlane(const float origin[3], const float dir[3], float hit[3]) {
+
   float denom = dot3(dir, writingPlane.normal);
+
   if (denom > -MIN_RAY_DOWNWARD) {
     return false;
   }
+
   float toPlane[3] = { writingPlane.point[0] - origin[0],
                        writingPlane.point[1] - origin[1],
                        writingPlane.point[2] - origin[2] };
@@ -1228,6 +1297,9 @@ void setup() {
   }
 }
 
+
+
+
 void loop() {
   uint32_t nowMs = millis();
 
@@ -1251,16 +1323,9 @@ void loop() {
 
   uint32_t busyUs = micros() - nowUs;                // time spent inside this tick
 
-  if (busyUs > 65535UL) {
-    busyUs = 65535UL;
-  }
+  if (busyUs > 65535UL)  busyUs = 65535UL;
 
-  if ((uint16_t)busyUs > loopMaxUs) {
-    loopMaxUs = (uint16_t)busyUs;
-  }
+  if ((uint16_t)busyUs > loopMaxUs)  loopMaxUs = (uint16_t)busyUs;
 
-  if (busyUs > SAMPLE_PERIOD_US) {                  // tick took longer than the 2 ms period
-    overrunCount++;
-  }
-         
+  if (busyUs > SAMPLE_PERIOD_US)  overrunCount++;                // tick took longer than the 2 ms period  
 }
